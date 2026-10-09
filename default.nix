@@ -77,6 +77,7 @@ let
   mkNixLdWrapper = name: target: pkgs.writeShellScriptBin name ''
     export NIX_LD="${nixLdLib}/ld.so"
     export NIX_LD_LIBRARY_PATH="${nixLdLib}"
+    export XDG_DATA_DIRS="${lib.makeSearchPath "share" [ pkgs.gtk3 pkgs.gsettings-desktop-schemas ]}:''${XDG_DATA_DIRS:-/run/current-system/sw/share}"
     exec ${target} "$@"
   '';
 
@@ -89,6 +90,35 @@ let
   fctTray = mkNixLdWrapper "forticlient-tray" "/opt/forticlient/fortitray";
   # URL-scheme handler (see below) — forwards the SAML deep-link into the GUI.
   fctUrlHandler = mkNixLdWrapper "forticlient-url-handler" "/opt/forticlient/gui/FortiClient";
+
+  installForticlient = pkgs.writeShellScript "install-forticlient" ''
+    set -eu
+    export PATH=${lib.makeBinPath [ pkgs.coreutils ]}
+    mkdir -p /opt /var/lib/forticlient
+    if [ -f /var/lib/forticlient/installed-package ] &&
+       [ "$(cat /var/lib/forticlient/installed-package)" = "${cfg.package}" ] &&
+       [ -d /opt/forticlient ]; then
+      exit 0
+    fi
+    staging=$(mktemp -d /opt/.forticlient-new.XXXXXXXX)
+    trap 'if [ -d "$staging" ]; then rm -rf "$staging"; fi' EXIT
+    cp -a ${cfg.package}/opt/forticlient/. "$staging/"
+    if [ -d /opt/forticlient ]; then
+      # Keep registration data and any locally created files. Package files in
+      # the staged release take precedence over old binaries.
+      cp -an /opt/forticlient/. "$staging/"
+      backup=$(mktemp -d /var/lib/forticlient/backup.XXXXXXXX)
+      rmdir "$backup"
+      mv /opt/forticlient "$backup"
+      if ! mv "$staging" /opt/forticlient; then
+        mv "$backup" /opt/forticlient
+        exit 1
+      fi
+    else
+      mv "$staging" /opt/forticlient
+    fi
+    printf '%s\n' '${cfg.package}' > /var/lib/forticlient/installed-package
+  '';
 
   fctDesktop = pkgs.makeDesktopItem {
     name = "forticlient";
@@ -188,10 +218,9 @@ in
     programs.nix-ld.libraries = baseLibraries ++ cfg.extraLibraries;
 
     ###### Materialise the FHS paths FortiClient hardcodes ######
-    # /opt must be writable (FortiClient writes markers like .fct_ec_registered
-    # and the EMS cert there), so copy the store tree out rather than symlinking.
+    # /opt must be writable (FortiClient writes registration state there).
+    # The service installs new releases before starting; tmpfiles seeds state.
     systemd.tmpfiles.rules = [
-      "C /opt/forticlient 0755 root root - ${cfg.package}/opt/forticlient"
       "d /etc/forticlient 0755 root root - -"
       "d /var/lib/forticlient 0755 root root - -"
       "d /var/run/forticlient 0755 root root - -"
@@ -224,6 +253,7 @@ in
       stopIfChanged = false;
       serviceConfig = {
         Type = "simple";
+        ExecStartPre = installForticlient;
         ExecStart = "/opt/forticlient/fctsched";
         ExecReload = "/bin/kill -HUP $MAINPID";
         Restart = "always";

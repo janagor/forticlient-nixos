@@ -12,9 +12,9 @@
 , xz
   # Override these to track a different FortiClient (Linux) release. Find newer
   # versions + the matching sha256 at https://repo.fortinet.com/repo/forticlient/
-, version ? "7.4.7.1868"
+, version ? "7.4.8.1904"
 , url ? "https://repo.fortinet.com/repo/forticlient/7.4/ubuntu22/pool/non-free/f/forticlient/forticlient_${version}_amd64.deb"
-, sha256 ? "2957adb27aafeb61b22c1b7c2698f1e70f407db4cf70e0c874ed8a0b9b8ab908"
+, sha256 ? "8f939c42e9de7c723251277230da913b9f38f93ad2a2535a3ebd77e139bfed81"
 }:
 
 stdenv.mkDerivation {

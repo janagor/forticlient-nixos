@@ -21,6 +21,11 @@
       # The repackaged FortiClient derivation, if you want it standalone.
       packages = forAllSystems (system: rec {
         forticlient = (pkgsFor system).callPackage ./package.nix { };
+        forticlient-8 = forticlient.override {
+          version = "8.0.0.0055";
+          url = "https://repo.fortinet.com/repo/forticlient/8.0/ubuntu/pool/non-free/f/forticlient/forticlient_8.0.0.0055_amd64.deb";
+          sha256 = "eba230c1b6e6d1ac76b8c77633444ff40410651ee0a5716914cbb2f879f19cd6";
+        };
         default = forticlient;
       });
 

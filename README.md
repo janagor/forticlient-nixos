@@ -120,17 +120,34 @@ work over IPC.
 ### Updating the FortiClient version
 
 > **Heads up:** Fortinet's repo **rotates/removes older point releases**, so the
-> pinned version here (`7.4.7.1868`) *will* eventually 404. When a fresh build
+> pinned version here (`7.4.8.1904`) *will* eventually 404. When a fresh build
 > fails to download, bump to a current release + its hash.
 
-Find a current build at <https://repo.fortinet.com/repo/forticlient/> and get its
-hash with `nix-prefetch-url <deb-url>`, then override the package:
+The flake provides the latest checked 7.4 build as `packages.x86_64-linux.forticlient`
+and an opt-in 8.0 build as `packages.x86_64-linux.forticlient-8`. To select 8.0:
+
+```nix
+services.forticlient.package =
+  inputs.forticlient-nixos.packages.x86_64-linux.forticlient-8;
+```
+
+The 8.0 package is from Fortinet's official Ubuntu repository, version
+`8.0.0.0055`. Its binary layout was inspected, but VPN/EMS authentication has
+not been tested on a live NixOS system. Back up `/var/lib/forticlient` and
+`/opt/forticlient` before switching releases. Restart `forticlient.service`
+after rebuilding to install the selected release. The previous `/opt` directory
+is retained under `/var/lib/forticlient/backup.*`; rollback to an older NixOS
+generation and restart the service to restore the older binaries.
+
+For another build, find it at <https://repo.fortinet.com/repo/forticlient/> and get
+its hash with `nix-prefetch-url <deb-url>`, then override the package:
 
 ```nix
 # Flakes (needs `inputs` in scope — pass specialArgs = { inherit inputs; }):
 services.forticlient.package =
   inputs.forticlient-nixos.packages.x86_64-linux.forticlient.override {
     version = "7.4.8.xxxx";
+    url = "https://repo.fortinet.com/repo/forticlient/7.4/ubuntu22/pool/non-free/f/forticlient/forticlient_7.4.8.xxxx_amd64.deb";
     sha256 = "…";
   };
 
@@ -138,6 +155,7 @@ services.forticlient.package =
 services.forticlient.package =
   pkgs.callPackage ./forticlient-nixos/package.nix {
     version = "7.4.8.xxxx";
+    url = "https://repo.fortinet.com/repo/forticlient/7.4/ubuntu22/pool/non-free/f/forticlient/forticlient_7.4.8.xxxx_amd64.deb";
     sha256 = "…";
   };
 ```
@@ -152,8 +170,8 @@ This is the interesting part — the non-obvious things needed to make it work.
   and a curated library set.
 - **Real FHS paths.** The binaries hardcode `/opt/forticlient`, `/etc/forticlient`
   and `/var/lib/forticlient`. `/opt` must be **writable** (it stores the EMS
-  registration marker + cert), so we *copy* the store tree out via
-  `systemd.tmpfiles` rather than symlinking it.
+  registration marker + cert). The service stages the selected release there
+  before startup, preserves local files, and backs up the previous tree.
 - **`restartIfChanged = false`.** On startup `fctsched` does `su - <user>` to
   launch the tray; that session holds the `nixos-rebuild switch` pseudo-terminal
   open and makes the rebuild *hang*. Not restarting the service on rebuilds avoids
@@ -161,6 +179,9 @@ This is the interesting part — the non-obvious things needed to make it work.
   `sudo systemctl restart forticlient`.
 - **`libnotify`.** Without `libnotify.so.4` the tray (`fortitray`) crashes on
   start — and the tray is what brokers SAML, so SSO silently never happens.
+- **GTK schemas.** The GUI, tray, and URL handler wrappers add GTK and desktop
+  schema directories to `XDG_DATA_DIRS` so GTK settings and file choosers can
+  find their installed schemas outside a standard FHS distribution.
 - **The SAML deep-link — the big one.** When a tunnel needs SAML, `fortitray`
   runs `/usr/bin/xdg-open "fabricagent://vpn?tunnelName=…&gateway=…"`. The GUI's
   protocol handler (`handleSAMLVPNAuthentication`) is the **only** thing that
